@@ -1,6 +1,5 @@
 streamlit
 PyPDF2
-pdf2image
-pytesseract
+pdfplumber
 openpyxl
-poppler-utils
+pandas
