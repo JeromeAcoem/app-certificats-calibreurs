@@ -47,6 +47,7 @@ if uploaded_files:
                 for i in range(0, len(images), 2):
                     try:
                         text = pytesseract.image_to_string(images[i])
+                        st.text_area(f"OCR Page {i+1} de {base_name}", text, height=100)
                         match = serial_number_pattern.search(text)
                         serial = match.group(1) if match else f"Unknown_{i//2+1}"
                         serial_numbers.append(serial)
@@ -91,6 +92,13 @@ if uploaded_files:
                         total_files += 1
                     except Exception as e:
                         errors.append(f"[PDF WRITE ERROR] {pdf_name} → Pages {i+1}-{i+2} : {str(e)}")
+
+            if not csv_data:
+                st.error("❌ Aucun certificat n'a été généré. Vérifiez que vos fichiers contiennent des pages valides avec des numéros de série, et que le découpage fonctionne.")
+                if errors:
+                    st.warning("Voici les erreurs détectées :")
+                    for err in errors:
+                        st.text(err)
 
             # Rapport Excel
             df = pd.DataFrame(csv_data)
