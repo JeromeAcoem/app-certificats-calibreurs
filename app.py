@@ -3,16 +3,15 @@ import re
 import shutil
 import zipfile
 import tempfile
-import pytesseract
+import pdfplumber
 from PyPDF2 import PdfReader, PdfWriter
-from pdf2image import convert_from_path
 from collections import defaultdict, Counter
 from datetime import datetime
 import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="Certificats Calibreurs", layout="centered")
-st.title("Certificats Calibreurs - Split & OCR")
+st.title("Certificats Calibreurs - Split & Extraction")
 
 uploaded_files = st.file_uploader("Chargez vos fichiers PDF", type="pdf", accept_multiple_files=True)
 
@@ -38,28 +37,23 @@ if uploaded_files:
                     f.write(uploaded_file.read())
 
                 try:
-                    images = convert_from_path(pdf_path)
-                except Exception as e:
-                    errors.append(f"[LOAD ERROR] {pdf_name} : {str(e)}")
-                    continue
-
-                serial_numbers = []
-                for i in range(0, len(images), 2):
-                    try:
-                        text = pytesseract.image_to_string(images[i])
-                        st.text_area(f"OCR Page {i+1} de {base_name}", text, height=100)
-                        match = serial_number_pattern.search(text)
-                        serial = match.group(1) if match else f"Unknown_{i//2+1}"
-                        serial_numbers.append(serial)
-                    except Exception as e:
-                        serial_numbers.append(f"Error_{i//2+1}")
-                        errors.append(f"[OCR ERROR] {pdf_name} → Page {i+1} : {str(e)}")
-
-                try:
                     reader = PdfReader(pdf_path)
                     num_pages = len(reader.pages)
                 except Exception as e:
                     errors.append(f"[PDF READ ERROR] {pdf_name} : {str(e)}")
+                    continue
+
+                serial_numbers = []
+                try:
+                    with pdfplumber.open(pdf_path) as pdf:
+                        for i in range(0, len(pdf.pages), 2):
+                            text = pdf.pages[i].extract_text() or ""
+                            st.text_area(f"Texte extrait - Page {i+1} de {base_name}", text, height=100)
+                            match = serial_number_pattern.search(text)
+                            serial = match.group(1) if match else f"Unknown_{i//2+1}"
+                            serial_numbers.append(serial)
+                except Exception as e:
+                    errors.append(f"[TEXT EXTRACTION ERROR] {pdf_name} : {str(e)}")
                     continue
 
                 for i in range(0, num_pages, 2):
@@ -94,13 +88,12 @@ if uploaded_files:
                         errors.append(f"[PDF WRITE ERROR] {pdf_name} → Pages {i+1}-{i+2} : {str(e)}")
 
             if not csv_data:
-                st.error("❌ Aucun certificat n'a été généré. Vérifiez que vos fichiers contiennent des pages valides avec des numéros de série, et que le découpage fonctionne.")
+                st.error("❌ Aucun certificat n'a été généré. Vérifiez que vos fichiers contiennent des pages valides avec des numéros de série.")
                 if errors:
                     st.warning("Voici les erreurs détectées :")
                     for err in errors:
                         st.text(err)
 
-            # Rapport Excel
             df = pd.DataFrame(csv_data)
             excel_path = os.path.join(temp_dir, "rapport_certificats.xlsx")
             with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
@@ -112,7 +105,6 @@ if uploaded_files:
                 if errors:
                     pd.DataFrame(errors, columns=["Erreurs"]).to_excel(writer, sheet_name="Erreurs", index=False)
 
-            # Archive ZIP
             zip_path = os.path.join(temp_dir, f"certificats_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.zip")
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for root, _, files_in_dir in os.walk(output_dir):
